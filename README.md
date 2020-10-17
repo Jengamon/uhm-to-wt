@@ -10,14 +10,16 @@ Right now, is very buggy, and can only support certain commands (and formula exp
 - [x] NumFrames
 - [x] Seed
 - [x] Wave
-- [-] Spectrum
+- [x] Spectrum (\*)
 - [ ] Phase
 - [ ] Import
 - [ ] Export
 - [ ] Move
 - [ ] Interpolate
-- [-] Normalize
+- [x] Normalize (\*)
 - [ ] Envelope
+
+(\*) means *is buggy*.
 
 ### Formula Expressions
 

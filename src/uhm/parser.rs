@@ -327,11 +327,11 @@ impl<'a> Parser<'a> {
                 },
                 Some(TokenKind::Lowest) => {
                     expect!(self => TokenKind::Lowest, TokenKind::Equal);
-                    lowest = self.parse_bounded_number(0, 1023)? as u16;
+                    lowest = self.parse_bounded_number(0, 1024)? as u16;
                 },
                 Some(TokenKind::Highest) => {
                     expect!(self => TokenKind::Highest, TokenKind::Equal);
-                    highest = self.parse_bounded_number(0, 1023)? as u16;
+                    highest = self.parse_bounded_number(0, 1024)? as u16;
                 }
                 Some(TokenKind::Target) => {
                     expect!(self => TokenKind::Target, TokenKind::Equal);

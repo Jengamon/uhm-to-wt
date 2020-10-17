@@ -164,7 +164,7 @@ impl Processor {
         }
     }
 
-    fn blend(blend_mode: BlendMode, target: &mut Frame, source: &Frame) {
+    fn blend(blend_mode: BlendMode, target: &mut [f32], source: &[f32]) {
         for i in 0..2048 {
             match blend_mode {
                 BlendMode::Replace => target[i] = source[i],
@@ -183,9 +183,10 @@ impl Processor {
             NormalizeMetric::Rms => {
                 // let zdb_factor = Processor::calculate_metric(&f.iter().map(|x| x * target_for_peak).collect::<Vec<_>>(), NormalizeMetric::Rms);
                 // println!("{} {}", target_for_peak, zdb_factor);
-                10.0f32.powf(db / 20.0) // * zdb_factor
+                10.0f32.powf(db / 10.0) // * zdb_factor
+                // A power quanitty
             },
-            NormalizeMetric::Peak => 10.0f32.powf(db / 10.0),
+            NormalizeMetric::Peak => 10.0f32.powf(db / 20.0), // An amplitude quantity
             _ => todo!("db_to_lin")
         }
     }
@@ -228,10 +229,9 @@ impl Processor {
                 fft.process(&mut target_input, &mut target_output); // Process and get partials for target
                 let mut new_amplitudes = [0.0f32; 1025];
                 let mut new_phases = [0.0f32; 1025];
-                let target_output: Vec<_> = target_output.into_iter().map(|x| x * Complex::new(1.0 / 1024.0, 0.0)).collect();
                 // println!("///\n{:?}\n?\n[{}]", target_buffer[frame as usize], target_output.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
                 for (i, complex) in target_output.iter().take(1025).enumerate() {
-                    new_amplitudes[i] = (complex.re.powi(2) + complex.im.powi(2)).sqrt();
+                    new_amplitudes[i] = (complex.re.powi(2) + complex.im.powi(2)).sqrt() * (1.0 / 2048.0);
                     new_phases[i] = complex.im.atan2(complex.re);
                     // println!("Partial {}: {} (theta = {})", i, new_amplitudes[i], new_phases[i]);
                 }
@@ -239,13 +239,17 @@ impl Processor {
                 let min = std::cmp::min(lowest, highest);
                 let max = std::cmp::max(lowest, highest);
                 for partial in min..=max {
-                    let ref mut target_array = if amp_mode { &mut new_amplitudes } else { &mut new_phases };
+                    let (ref mut target_array, ref mut other_array) = if amp_mode { 
+                        (&mut new_amplitudes,  &mut new_phases) 
+                    } else { 
+                        (&mut new_phases, &mut new_amplitudes)
+                    };
                     let partial = if is_forward { 
                         if highest < lowest { max as usize - partial as usize } else { partial as usize } 
                     } else { 
                         if highest < lowest { partial as usize } else { max as usize - partial as usize }
                     };
-                    println!(">> {}", partial);
+                    // println!(">> {}", partial);
                     interpreter.input = target_array[partial];
                     interpreter.frame = frame as f32;
                     interpreter.table = (frame - start) as f32 / (end - start) as f32;
@@ -259,10 +263,10 @@ impl Processor {
                     let result = interpreter.interpret(&formula, prev.as_slice());
                     interpreter.last_result = result;
                     // Because we are editing the spectrum one-sidedly, we have to do this.
-                    let result = if amp_mode { result * 2.0 } else { result };
-                    target_array[partial] = result ;
-                    // Convert real to imaginary
-
+                    let result = if amp_mode { result  } else { result };
+                    target_array[partial] = result;
+                    // Force sine 
+                    other_array[partial] = if amp_mode { -std::f32::consts::FRAC_PI_2 } else { 1.0 };
                 }
                 println!("vvv\n{:?}\nd\n{:?}", new_amplitudes, new_phases);
                 let polar:Vec<_> = new_amplitudes.iter().copied().zip(new_phases.iter().copied()).collect();
@@ -277,9 +281,9 @@ impl Processor {
                 println!("===\n[{}]", new_partials_input.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
                 let mut target_output = vec![Complex::zero(); 2048];
                 ifft.process(&mut new_partials_input, &mut target_output);
+                
                 let mut new_frame = [0.0f32; 2048];
                 for (i, c) in new_frame.iter_mut().zip(target_output.iter().copied().collect::<Vec<_>>()) {
-                    // let samp1 = c.im;
                     println!("{}", c);
                     *i = c.re;
                 }
@@ -288,8 +292,21 @@ impl Processor {
             }
         }
 
+        // Cop out and normalize the peaks of the frame *overall*
+        let normalize_factor = frames.iter().map(|f|
+            Processor::normalize_factor(f, NormalizeMetric::Peak, 0.0)
+        ).max_by(|x, y| x.partial_cmp(y).unwrap());
+        
+        let norm = if normalize_factor.is_none() && frames.len() > 0 {
+            unreachable!("Cannot find normalization factor");
+        } else if frames.len() == 0 {
+            return
+        } else {
+            normalize_factor.unwrap()
+        };
+
         for (frame, findex) in frames.into_iter().zip(start..=end) {
-            Processor::blend(blend, &mut self.buffer_mut(target)[findex as usize], &frame);
+            Processor::blend(blend, &mut self.buffer_mut(target)[findex as usize], &frame.iter().map(|x| x * norm).collect::<Vec<_>>());
         }
 }
 

@@ -222,30 +222,30 @@ impl Processor {
             let fmin = std::cmp::min(start, end);
             let fmax = std::cmp::max(start, end);
             for frame in fmin..=fmax {
-                let frame = if end < start { 255 - frame } else { frame };
+                let frame = if end < start { end - frame } else { frame };
                 let mut target_input: Vec<_> = target_buffer[frame as usize].iter().map(|x| Complex::new(*x, 0.0)).collect();
                 let mut target_output: Vec<_> = vec![Complex::zero(); 2048];
                 fft.process(&mut target_input, &mut target_output); // Process and get partials for target
-                let mut new_amplitudes = [0.0f32; 1024];
-                let mut new_phases = [0.0f32; 1024];
+                let mut new_amplitudes = [0.0f32; 1025];
+                let mut new_phases = [0.0f32; 1025];
                 let target_output: Vec<_> = target_output.into_iter().map(|x| x * Complex::new(1.0 / 1024.0, 0.0)).collect();
                 // println!("///\n{:?}\n?\n[{}]", target_buffer[frame as usize], target_output.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
-                for (i, complex) in target_output.iter().take(1024).enumerate() {
+                for (i, complex) in target_output.iter().take(1025).enumerate() {
                     new_amplitudes[i] = (complex.re.powi(2) + complex.im.powi(2)).sqrt();
                     new_phases[i] = complex.im.atan2(complex.re);
                     // println!("Partial {}: {} (theta = {})", i, new_amplitudes[i], new_phases[i]);
                 }
-                // println!("xxx\n{:?}\n9\n{:?}", new_amplitudes, new_phases);
+                println!("xxx\n{:?}\n><\n{:?}", new_amplitudes, new_phases);
                 let min = std::cmp::min(lowest, highest);
                 let max = std::cmp::max(lowest, highest);
                 for partial in min..=max {
                     let ref mut target_array = if amp_mode { &mut new_amplitudes } else { &mut new_phases };
                     let partial = if is_forward { 
-                        if highest < lowest { 1023 - partial as usize } else { partial as usize } 
+                        if highest < lowest { max as usize - partial as usize } else { partial as usize } 
                     } else { 
-                        if highest < lowest { partial as usize } else { 1023 - partial as usize }
+                        if highest < lowest { partial as usize } else { max as usize - partial as usize }
                     };
-                    // println!(">> {}", partial);
+                    println!(">> {}", partial);
                     interpreter.input = target_array[partial];
                     interpreter.frame = frame as f32;
                     interpreter.table = (frame - start) as f32 / (end - start) as f32;
@@ -258,26 +258,30 @@ impl Processor {
                     };
                     let result = interpreter.interpret(&formula, prev.as_slice());
                     interpreter.last_result = result;
-                    target_array[partial] = result;
+                    // Because we are editing the spectrum one-sidedly, we have to do this.
+                    let result = if amp_mode { result * 2.0 } else { result };
+                    target_array[partial] = result ;
+                    // Convert real to imaginary
 
                 }
-                // println!("vvv\n{:?}\nd\n{:?}", new_amplitudes, new_phases);
-                let mut new_partials_input: Vec<_> = new_amplitudes.iter()
+                println!("vvv\n{:?}\nd\n{:?}", new_amplitudes, new_phases);
+                let polar:Vec<_> = new_amplitudes.iter().copied().zip(new_phases.iter().copied()).collect();
+                let mut new_partials_input: Vec<_> = polar.iter()
                     //.zip(vec![0].into_iter().chain(0..=1023)).map(|(amp, scale)| (1.0 - (scale as f32 / 1024.0)) * amp) // Inverse scale all the amplitudes
-                    .zip(new_phases.iter())
                     // We want the real part of the signal to be made up of (positive) sine waves, so that's why
                     // we use amp * sin(phase) for the real part and amp * cos(phase) for the imaginary part
                     // where phase = atan2(real, imag) for the input
                     .map(|(amp, phase)| Complex::new(amp * phase.cos(), amp * phase.sin()))
-                    .chain(vec![Complex::zero(); 1024].into_iter()).collect();
+                    .chain(polar.iter().skip(1).rev().skip(1).map(|(amp, phase)| Complex::new(amp * phase.cos(), -amp * phase.sin())))
+                    .collect();
                 println!("===\n[{}]", new_partials_input.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
                 let mut target_output = vec![Complex::zero(); 2048];
                 ifft.process(&mut new_partials_input, &mut target_output);
                 let mut new_frame = [0.0f32; 2048];
                 for (i, c) in new_frame.iter_mut().zip(target_output.iter().copied().collect::<Vec<_>>()) {
-                    let samp1 = c.im;
-                    // println!("{}", samp1);
-                    *i = samp1;
+                    // let samp1 = c.im;
+                    println!("{}", c);
+                    *i = c.re;
                 }
                 // println!("===");
                 frames.push(new_frame);
@@ -339,7 +343,7 @@ impl Processor {
                     let fmin = std::cmp::min(start, end);
                     let fmax = std::cmp::max(start, end);
                     for frame in fmin..=fmax {
-                        let frame = if end < start { 255 - frame } else { frame };
+                        let frame = if end < start { end - frame } else { frame };
                         let mut new_frame = [0.0f32; 2048];
                         for sample in 0..2048 {
                             let sample = if is_forward { sample } else { 2047 - sample };

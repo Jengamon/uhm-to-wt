@@ -232,7 +232,7 @@ impl Processor {
                 // println!("///\n{:?}\n?\n[{}]", target_buffer[frame as usize], target_output.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(","));
                 for (i, complex) in target_output.iter().take(1025).enumerate() {
                     new_amplitudes[i] = (complex.re.powi(2) + complex.im.powi(2)).sqrt() * (1.0 / 2048.0);
-                    new_phases[i] = complex.im.atan2(complex.re);
+                    new_phases[i] = complex.im.atan2(complex.re) + std::f32::consts::FRAC_PI_2;
                     // println!("Partial {}: {} (theta = {})", i, new_amplitudes[i], new_phases[i]);
                 }
                 println!("xxx\n{:?}\n><\n{:?}", new_amplitudes, new_phases);
@@ -240,7 +240,7 @@ impl Processor {
                 let max = std::cmp::max(lowest, highest);
                 for partial in min..=max {
                     let (ref mut target_array, ref mut other_array) = if amp_mode { 
-                        (&mut new_amplitudes,  &mut new_phases) 
+                        (&mut new_amplitudes, &mut new_phases)
                     } else { 
                         (&mut new_phases, &mut new_amplitudes)
                     };
@@ -263,13 +263,14 @@ impl Processor {
                     let result = interpreter.interpret(&formula, prev.as_slice());
                     interpreter.last_result = result;
                     // Because we are editing the spectrum one-sidedly, we have to do this.
-                    let result = if amp_mode { result  } else { result };
+                    let result = if amp_mode { result * (1.0 / (max - min) as f32) } else { result };
                     target_array[partial] = result;
-                    // Force sine 
-                    other_array[partial] = if amp_mode { -std::f32::consts::FRAC_PI_2 } else { 1.0 };
+                    if amp_mode {
+                        other_array[partial] = 0.0;
+                    }
                 }
                 println!("vvv\n{:?}\nd\n{:?}", new_amplitudes, new_phases);
-                let polar:Vec<_> = new_amplitudes.iter().copied().zip(new_phases.iter().copied()).collect();
+                let polar:Vec<_> = new_amplitudes.iter().copied().zip(new_phases.iter().copied().map(|x| x - std::f32::consts::FRAC_PI_2)).collect();
                 let mut new_partials_input: Vec<_> = polar.iter()
                     //.zip(vec![0].into_iter().chain(0..=1023)).map(|(amp, scale)| (1.0 - (scale as f32 / 1024.0)) * amp) // Inverse scale all the amplitudes
                     // We want the real part of the signal to be made up of (positive) sine waves, so that's why
@@ -284,29 +285,32 @@ impl Processor {
                 
                 let mut new_frame = [0.0f32; 2048];
                 for (i, c) in new_frame.iter_mut().zip(target_output.iter().copied().collect::<Vec<_>>()) {
-                    println!("{}", c);
+                    print!("{:.3} ", c.re);
                     *i = c.re;
                 }
-                // println!("===");
+                println!("\n===");
                 frames.push(new_frame);
             }
         }
 
         // Cop out and normalize the peaks of the frame *overall*
-        let normalize_factor = frames.iter().map(|f|
-            Processor::normalize_factor(f, NormalizeMetric::Peak, 0.0)
-        ).max_by(|x, y| x.partial_cmp(y).unwrap());
+        // let normalize_factor = frames.iter().map(|f|
+        //     Processor::normalize_factor(f, NormalizeMetric::Peak, 0.0)
+        // ).max_by(|x, y| x.partial_cmp(y).unwrap());
         
-        let norm = if normalize_factor.is_none() && frames.len() > 0 {
-            unreachable!("Cannot find normalization factor");
-        } else if frames.len() == 0 {
-            return
-        } else {
-            normalize_factor.unwrap()
-        };
+        // let norm = if normalize_factor.is_none() && frames.len() > 0 {
+        //     unreachable!("Cannot find normalization factor");
+        // } else if frames.len() == 0 {
+        //     return
+        // } else {
+        //     normalize_factor.unwrap()
+        // };
+
+        println!("{:?}", frames.iter().flat_map(|x| x).max_by(|x, y| x.abs().partial_cmp(&y.abs()).unwrap()));
 
         for (frame, findex) in frames.into_iter().zip(start..=end) {
-            Processor::blend(blend, &mut self.buffer_mut(target)[findex as usize], &frame.iter().map(|x| x * norm).collect::<Vec<_>>());
+            // Processor::blend(blend, &mut self.buffer_mut(target)[findex as usize], &frame.iter().map(|x| x * norm).collect::<Vec<_>>());
+            Processor::blend(blend, &mut self.buffer_mut(target)[findex as usize], &frame);
         }
 }
 
